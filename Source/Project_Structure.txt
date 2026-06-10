@@ -1,0 +1,11 @@
+SmartSampler/
+├── CMakeLists.txt
+├── Source/
+│   ├── PluginProcessor.h
+│   ├── PluginProcessor.cpp
+│   ├── PluginEditor.h
+│   ├── PluginEditor.cpp
+│   ├── AnalyzerEngine.h
+│   ├── AnalyzerEngine.cpp
+│   ├── SamplerEngine.h
+│   └── SamplerEngine.cpp

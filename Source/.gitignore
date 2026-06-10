@@ -1,0 +1,13 @@
+buildV3/
+build/
+*.lib
+*.exp
+*.pdb
+JUCE/
+.vs/
+*.user
+build_log.txt
+CMakeLists.txt.bak
+__pycache__/
+*.o
+*.so
