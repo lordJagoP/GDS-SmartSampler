@@ -58,9 +58,16 @@ void SmartSamplerEditor::filesDropped(const juce::StringArray& files, int, int)
 {
     if (files.isEmpty()) return;
     juce::File f(files[0]);
-    processor.loadSampleFile(f);
-    statusLabel.setText("Loaded: " + f.getFileName(), juce::dontSendNotification);
-    statusLabel.setColour(juce::Label::textColourId, juce::Colours::limegreen);
+    if (processor.loadSampleFile(f))
+    {
+        statusLabel.setText("Loaded: " + f.getFileName(), juce::dontSendNotification);
+        statusLabel.setColour(juce::Label::textColourId, juce::Colours::limegreen);
+    }
+    else
+    {
+        statusLabel.setText("Unsupported or unreadable sample", juce::dontSendNotification);
+        statusLabel.setColour(juce::Label::textColourId, juce::Colours::red);
+    }
 }
 
 void SmartSamplerEditor::paint(juce::Graphics& g)

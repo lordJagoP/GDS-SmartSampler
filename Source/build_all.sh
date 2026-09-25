@@ -1,51 +1,90 @@
 #!/usr/bin/env bash
-set -e
+set -Eeuo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-JUCE_DIR="$PROJECT_DIR/JUCE"
-BUILD_DIR="$PROJECT_DIR/buildV3"
+PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_DIR="${BUILD_DIR:-$PROJECT_DIR/build/linux-release}"
+GENERATOR="${CMAKE_GENERATOR:-Ninja}"
 
-echo "======================================"
-echo " SmartSampler VST3 Build Script"
-echo " Platform: $(uname -s)"
-echo "======================================"
+usage() {
+    cat <<'USAGE'
+Usage: ./build_all.sh [--install-deps] [--clean] [--no-install]
 
-# --- 1. Clone JUCE if not present ---
-if [ ! -d "$JUCE_DIR" ]; then
-    echo "[1/4] Cloning JUCE..."
-    git clone --depth 1 https://github.com/juce-framework/JUCE.git "$JUCE_DIR"
-else
-    echo "[1/4] JUCE already present — skipping clone."
+  --install-deps  Install the Kali/Debian JUCE build dependencies with apt.
+  --clean         Remove the selected build directory before configuring.
+  --no-install    Build without copying SmartSampler.vst3 into ~/.vst3.
+USAGE
+}
+
+INSTALL_DEPS=0
+CLEAN=0
+INSTALL_PLUGIN=1
+
+while (($#)); do
+    case "$1" in
+        --install-deps) INSTALL_DEPS=1 ;;
+        --clean) CLEAN=1 ;;
+        --no-install) INSTALL_PLUGIN=0 ;;
+        -h|--help) usage; exit 0 ;;
+        *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+    esac
+    shift
+done
+
+if [[ "$(uname -s)" != Linux ]]; then
+    printf 'This helper targets Linux. Use CMake directly on Windows or macOS.\n' >&2
+    exit 1
 fi
 
-# --- 2. Patch CMakeLists.txt to use local JUCE path ---
-sed -i.bak "s|add_subdirectory(/path/to/JUCE JUCE)|add_subdirectory(JUCE JUCE)|g" "$PROJECT_DIR/CMakeLists.txt"
-echo "[2/4] CMakeLists.txt patched."
+if ((INSTALL_DEPS)); then
+    command -v sudo >/dev/null || { echo 'sudo is required for --install-deps.' >&2; exit 1; }
+    sudo apt update
+    sudo apt install -y \
+        build-essential git cmake ninja-build pkg-config \
+        libasound2-dev libjack-jackd2-dev ladspa-sdk \
+        libfreetype6-dev libfontconfig1-dev \
+        libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+        libxinerama-dev libxrandr-dev libxrender-dev libxi-dev \
+        libglu1-mesa-dev mesa-common-dev libegl-dev
+fi
 
-# --- 3. Configure ---
-echo "[3/4] Configuring with CMake into buildV3..."
-cmake -S "$PROJECT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+for cmd in cmake git c++; do
+    command -v "$cmd" >/dev/null || {
+        printf 'Missing required command: %s\nRun: ./build_all.sh --install-deps\n' "$cmd" >&2
+        exit 1
+    }
+done
 
-# --- 4. Build ---
-echo "[4/4] Building VST3..."
-cmake --build "$BUILD_DIR" --config Release --parallel
+if [[ "$GENERATOR" == Ninja ]]; then
+    command -v ninja >/dev/null || {
+        echo 'Ninja is missing. Install ninja-build or set CMAKE_GENERATOR.' >&2
+        exit 1
+    }
+fi
 
-# --- 5. Install VST3 ---
-echo ""
-echo "======================================"
-echo " Build complete!"
-echo "======================================"
+if ((CLEAN)); then
+    rm -rf -- "$BUILD_DIR"
+fi
 
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    VST3_DEST="$HOME/Library/Audio/Plug-Ins/VST3"
-    mkdir -p "$VST3_DEST"
-    cp -r "$BUILD_DIR/SmartSampler_artefacts/Release/VST3/SmartSampler.vst3" "$VST3_DEST/"
-    echo " Installed to: $VST3_DEST/SmartSampler.vst3"
-else
+printf 'Configuring SmartSampler for %s (%s)\n' "$(uname -m)" "$GENERATOR"
+cmake -S "$PROJECT_DIR" -B "$BUILD_DIR" -G "$GENERATOR" \
+    -DCMAKE_BUILD_TYPE=Release
+
+cmake --build "$BUILD_DIR" --parallel \
+    --target SmartSampler_VST3 SmartSampler_Standalone
+
+VST3_SOURCE="$BUILD_DIR/SmartSampler_artefacts/Release/VST3/SmartSampler.vst3"
+STANDALONE="$BUILD_DIR/SmartSampler_artefacts/Release/Standalone/SmartSampler"
+
+[[ -d "$VST3_SOURCE" ]] || { echo "VST3 bundle not found: $VST3_SOURCE" >&2; exit 1; }
+[[ -x "$STANDALONE" ]] || { echo "Standalone binary not found: $STANDALONE" >&2; exit 1; }
+
+if ((INSTALL_PLUGIN)); then
     VST3_DEST="$HOME/.vst3"
-    mkdir -p "$VST3_DEST"
-    cp -r "$BUILD_DIR/SmartSampler_artefacts/Release/VST3/SmartSampler.vst3" "$VST3_DEST/"
-    echo " Installed to: $VST3_DEST/SmartSampler.vst3"
+    install -d "$VST3_DEST"
+    rm -rf -- "$VST3_DEST/SmartSampler.vst3"
+    cp -a -- "$VST3_SOURCE" "$VST3_DEST/"
+    printf 'Installed VST3: %s/SmartSampler.vst3\n' "$VST3_DEST"
 fi
 
-echo " Restart your DAW and scan for new plugins."
+printf 'Standalone: %s\n' "$STANDALONE"
+printf 'Build complete. Rescan VST3 plug-ins in your DAW.\n'

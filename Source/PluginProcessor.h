@@ -33,7 +33,7 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     // Public access for editor
-    void loadSampleFile(const juce::File& f) { samplerEngine.loadSample(f); }
+    bool loadSampleFile(const juce::File& f) { return samplerEngine.loadSample(f); }
     bool isSampleLoaded() const { return samplerEngine.isSampleLoaded(); }
 
     // Parameters exposed to the UI

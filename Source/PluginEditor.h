@@ -27,8 +27,6 @@ private:
     juce::Label  dropZoneLabel;
     juce::Label  statusLabel;
 
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> tightnessAttach;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> harmonicAttach;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SmartSamplerEditor)
 };

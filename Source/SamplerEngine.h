@@ -1,13 +1,14 @@
 #pragma once
 #include <JuceHeader.h>
 #include "AnalyzerEngine.h"
+#include <atomic>
 
 class SamplerEngine
 {
 public:
     SamplerEngine();
     void prepare(double sampleRate, int blockSize);
-    void loadSample(const juce::File& file);
+    bool loadSample(const juce::File& file);
 
     void processMidi(juce::MidiBuffer& midi,
                      juce::AudioBuffer<float>& outputBuf,
@@ -16,7 +17,7 @@ public:
                      float tightness,
                      float harmonicBlend);
 
-    bool isSampleLoaded() const { return sampleLoaded; }
+    bool isSampleLoaded() const { return sampleLoaded.load(); }
 
 private:
     void triggerNote(int midiNote, float velocity);
@@ -24,7 +25,7 @@ private:
 
     double sampleRate  = 44100.0;
     int    blockSize   = 512;
-    bool   sampleLoaded = false;
+    std::atomic_bool sampleLoaded { false };
 
     juce::AudioBuffer<float> sampleBuffer;
     int    sampleLength    = 0;
@@ -35,4 +36,5 @@ private:
     float  currentVelocity = 1.0f;
 
     juce::AudioFormatManager formatManager;
+    mutable juce::CriticalSection sampleLock;
 };
