@@ -26,14 +26,28 @@ void AnalyzerEngine::prepare(double sr, int blockSz)
 
 void AnalyzerEngine::analyzeBlock(const juce::AudioBuffer<float>& buf)
 {
+    timingMap.fill(0.0f);
+
+    if (buf.getNumChannels() == 0 || buf.getNumSamples() < 2)
+    {
+        onsetDetected = false;
+        onsetStrength = 0.0f;
+        currentPitchHz = 0.0f;
+        return;
+    }
+
     detectOnset(buf);
     detectPitch(buf);
 
-    // Build timing map: per-sample warp offset based on onset strength
-    // Strong onset = sharper pull toward sidechain grid position
-    float warpPull = onsetDetected ? onsetStrength : 0.0f;
-    for (int i = 0; i < bufferSize; ++i)
-        timingMap[i] = warpPull * (float(i) / float(bufferSize));  // ramp into onset
+    // The public timing map is intentionally capped at 512 entries. Hosts may
+    // provide larger or variable blocks, so never index it using blockSize.
+    const int mapSamples = juce::jmin(buf.getNumSamples(),
+                                      static_cast<int>(timingMap.size()));
+    const float warpPull = onsetDetected ? onsetStrength : 0.0f;
+
+    for (int i = 0; i < mapSamples; ++i)
+        timingMap[static_cast<size_t>(i)] =
+            warpPull * (static_cast<float>(i) / static_cast<float>(mapSamples));
 }
 
 void AnalyzerEngine::detectOnset(const juce::AudioBuffer<float>& buf)
@@ -41,6 +55,9 @@ void AnalyzerEngine::detectOnset(const juce::AudioBuffer<float>& buf)
     // --- Dual envelope follower (fast attack / slow release) ---
     const float* data   = buf.getReadPointer(0);
     const int    nSamps = buf.getNumSamples();
+
+    if (nSamps == 0)
+        return;
 
     const float attackFast  = std::exp(-1.0f / (0.001f * (float)sampleRate));  // ~1ms
     const float attackSlow  = std::exp(-1.0f / (0.020f * (float)sampleRate));  // ~20ms
@@ -88,21 +105,25 @@ void AnalyzerEngine::detectPitch(const juce::AudioBuffer<float>& buf)
     const float* data   = buf.getReadPointer(0);
     const int    nSamps = buf.getNumSamples();
 
-    // Difference function
-    float minVal   = std::numeric_limits<float>::max();
-    int   minTau   = -1;
-    int   maxTau   = nSamps / 2;
+    if (nSamps < 16)
+    {
+        currentPitchHz = 0.0f;
+        return;
+    }
 
-    std::vector<float> d(maxTau, 0.0f);
+    // Difference function. Avoid allocating memory in the real-time callback.
+    float minVal = std::numeric_limits<float>::max();
+    int minTau = -1;
+    const int maxTau = nSamps / 2;
+
     for (int tau = 1; tau < maxTau; ++tau)
     {
         float sum = 0.0f;
-        for (int j = 0; j < maxTau; ++j)
+        for (int j = 0; j < maxTau && (j + tau) < nSamps; ++j)
         {
-            float diff = data[j] - data[j + tau];
+            const float diff = data[j] - data[j + tau];
             sum += diff * diff;
         }
-        d[tau] = sum;
 
         if (sum < minVal && tau > 4)
         {

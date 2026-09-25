@@ -45,9 +45,9 @@ void SmartSamplerProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // 1. Grab the sidechain bus (Bus index 1, input side)
     auto sidechainBuffer = getBusBuffer(buffer, true, 1);
 
-    // 2. Analyze: build onset + pitch data from sidechain this block
-    if (sidechainBuffer.getNumSamples() > 0)
-        analyzerEngine.analyzeBlock(sidechainBuffer);
+    // 2. Analyze: build onset + pitch data from the sidechain. Calling this
+    // for a disabled bus also clears stale analysis from the previous block.
+    analyzerEngine.analyzeBlock(sidechainBuffer);
 
     // 3. Prepare the main output buffer (clear it first)
     auto mainOutputBuffer = getBusBuffer(buffer, false, 0);
@@ -79,4 +79,15 @@ void SmartSamplerProcessor::setStateInformation(const void* data, int sizeInByte
         *tightnessParam      = stream.readFloat();
         *harmonicBlendParam  = stream.readFloat();
     }
+}
+
+
+juce::AudioProcessorEditor* SmartSamplerProcessor::createEditor()
+{
+    return new SmartSamplerEditor(*this);
+}
+
+juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
+{
+    return new SmartSamplerProcessor();
 }
