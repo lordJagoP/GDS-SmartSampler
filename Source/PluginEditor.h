@@ -26,6 +26,10 @@ private:
     juce::Label  harmonicBlendLabel;
     juce::Label  dropZoneLabel;
     juce::Label  statusLabel;
+#if !JucePlugin_IsSynth
+    juce::Slider dryKnob, wetKnob, triggerKnob;
+    juce::Label dryLabel, wetLabel, triggerLabel;
+#endif
 
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SmartSamplerEditor)

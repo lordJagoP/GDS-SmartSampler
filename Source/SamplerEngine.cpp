@@ -8,7 +8,9 @@ SamplerEngine::SamplerEngine()
 
 void SamplerEngine::prepare(double sr, int blockSz)
 {
+    const juce::ScopedLock lock(sampleLock);
     sampleRate = sr;
+    tailSeconds.store(static_cast<double>(sampleLength) / (sampleRate * 0.1));
     blockSize  = blockSz;
     playheadPos = 0.0;
     isPlaying   = false;
@@ -31,6 +33,8 @@ bool SamplerEngine::loadSample(const juce::File& file)
     const juce::ScopedLock lock(sampleLock);
     sampleBuffer = std::move(decoded);
     sampleLength = sampleBuffer.getNumSamples();
+    sourceSampleRate = reader->sampleRate;
+    tailSeconds.store(static_cast<double>(sampleLength) / (sampleRate * 0.1));
     sampleLoaded.store(true);
     playheadPos = 0.0;
     isPlaying = false;
@@ -40,7 +44,7 @@ bool SamplerEngine::loadSample(const juce::File& file)
 void SamplerEngine::triggerNote(int midiNote, float velocity)
 {
     currentMidiNote = (float)midiNote;
-    currentVelocity = velocity / 127.0f;
+    currentVelocity = juce::jlimit(0.0f, 1.0f, velocity);
     playheadPos     = 0.0;
     isPlaying       = true;
 }
@@ -56,40 +60,19 @@ void SamplerEngine::processMidi(juce::MidiBuffer& midi,
                                 const std::array<float, 512>& timingMap,
                                 float sidechainPitchHz,
                                 float tightness,       // 0.0 – 1.0
-                                float harmonicBlend)   // 0.0 – 1.0
+                                float harmonicBlend,
+                                float outputGain,
+                                bool clearOutput)
 {
-    outputBuf.clear();
-    if (!sampleLoaded.load())
+    if (clearOutput)
+        outputBuf.clear();
+    if (outputBuf.getNumChannels() == 0 || outputBuf.getNumSamples() == 0)
         return;
 
-    // Process MIDI events
-    for (const auto meta : midi)
-    {
-        auto msg = meta.getMessage();
-        if (msg.isNoteOn())
-            triggerNote(msg.getNoteNumber(), (float)msg.getVelocity());
-        else if (msg.isNoteOff())
-            releaseNote(msg.getNoteNumber());
-    }
-
-    if (!isPlaying)
-        return;
-
+    // All playback-state reads/writes share the sample-swap lock.
     const juce::ScopedLock lock(sampleLock);
-    if (sampleLength <= 0 || sampleBuffer.getNumChannels() == 0)
+    if (!sampleLoaded.load() || sampleLength <= 0 || sampleBuffer.getNumChannels() == 0)
         return;
-
-    // --- Pitch ratio: MIDI note vs root note of sample ---
-    float midiRatio = std::pow(2.0f, (currentMidiNote - rootNote) / 12.0f);
-
-    // --- Harmonic blend: shift toward sidechain pitch if > 0 ---
-    if (harmonicBlend > 0.0f && sidechainPitchHz > 20.0f)
-    {
-        float midiHz      = 440.0f * std::pow(2.0f, (currentMidiNote - 69.0f) / 12.0f);
-        float blendedHz   = midiHz * (1.0f - harmonicBlend) + sidechainPitchHz * harmonicBlend;
-        float rootHz      = 440.0f * std::pow(2.0f, (rootNote - 69.0f) / 12.0f);
-        midiRatio         = blendedHz / rootHz;
-    }
 
     auto* outL = outputBuf.getWritePointer(0);
     auto* outR = outputBuf.getNumChannels() > 1 ? outputBuf.getWritePointer(1) : nullptr;
@@ -100,35 +83,54 @@ void SamplerEngine::processMidi(juce::MidiBuffer& midi,
     const int numSamples = outputBuf.getNumSamples();
     const int mapSize = static_cast<int>(timingMap.size());
 
-    for (int i = 0; i < numSamples; ++i)
+    const auto render = [&](int start, int end)
     {
-        if ((int)playheadPos >= sampleLength)
+        if (!isPlaying)
+            return;
+        float midiRatio = std::pow(2.0f, (currentMidiNote - rootNote) / 12.0f);
+        if (harmonicBlend > 0.0f && sidechainPitchHz > 20.0f)
         {
-            isPlaying = false;
-            break;
+            const float midiHz = 440.0f * std::pow(2.0f, (currentMidiNote - 69.0f) / 12.0f);
+            const float blendedHz = midiHz * (1.0f - harmonicBlend) + sidechainPitchHz * harmonicBlend;
+            const float rootHz = 440.0f * std::pow(2.0f, (rootNote - 69.0f) / 12.0f);
+            midiRatio = blendedHz / rootHz;
         }
-
-        // --- DTW Pocket Control: warp playhead with sidechain timing map ---
-        // timingMap[i] is 0.0–1.0 onset pull strength from the analyzer
-        // tightness scales how hard we snap the playhead forward on transients
-        const float timingOffset = i < mapSize
-            ? timingMap[static_cast<size_t>(i)]
-            : 0.0f;
-        double warpDelta    = static_cast<double>(timingOffset) * static_cast<double>(tightness) * 2.0;
-        double playbackRate = midiRatio + warpDelta;
-        playbackRate        = juce::jmax(0.1, juce::jmin(4.0, playbackRate));  // safety clamp
-
-        // Linear interpolation for sub-sample playback
-        int    idx    = (int)playheadPos;
-        float  frac   = (float)(playheadPos - idx);
-        int    idxN   = juce::jmin(idx + 1, sampleLength - 1);
-
-        float sampleL = srcL[idx] * (1.0f - frac) + srcL[idxN] * frac;
-        float sampleR = srcR[idx] * (1.0f - frac) + srcR[idxN] * frac;
-
-        outL[i] = sampleL * currentVelocity;
-        if (outR) outR[i] = sampleR * currentVelocity;
-
-        playheadPos += playbackRate;
+        for (int i = start; i < end; ++i)
+        {
+            if ((int)playheadPos >= sampleLength)
+            {
+                isPlaying = false;
+                break;
+            }
+            const float timingOffset = i < mapSize
+                ? timingMap[static_cast<size_t>(i)] : 0.0f;
+            const double warpDelta = static_cast<double>(timingOffset) * tightness * 2.0;
+            const double playbackRate = juce::jlimit(0.1, 4.0,
+                (midiRatio + warpDelta) * sourceSampleRate / sampleRate);
+            const int idx = static_cast<int>(playheadPos);
+            const float frac = static_cast<float>(playheadPos - idx);
+            const int idxN = juce::jmin(idx + 1, sampleLength - 1);
+            const float sampleL = srcL[idx] * (1.0f - frac) + srcL[idxN] * frac;
+            const float sampleR = srcR[idx] * (1.0f - frac) + srcR[idxN] * frac;
+            outL[i] += sampleL * currentVelocity * outputGain;
+            if (outR)
+                outR[i] += sampleR * currentVelocity * outputGain;
+            playheadPos += playbackRate;
+        }
+    };
+    int cursor = 0;
+    for (const auto meta : midi)
+    {
+        const int position = juce::jlimit(cursor, numSamples, meta.samplePosition);
+        render(cursor, position);
+        const auto msg = meta.getMessage();
+        if (msg.isNoteOn())
+            triggerNote(msg.getNoteNumber(), msg.getFloatVelocity());
+        else if (msg.isNoteOff())
+            releaseNote(msg.getNoteNumber());
+        else if (msg.isAllNotesOff() || msg.isAllSoundOff())
+            releaseNote(0);
+        cursor = position;
     }
+    render(cursor, numSamples);
 }

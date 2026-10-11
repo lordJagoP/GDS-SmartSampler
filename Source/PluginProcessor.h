@@ -17,11 +17,11 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return "SmartSampler"; }
+    const juce::String getName() const override { return JucePlugin_Name; }
     bool   acceptsMidi()  const override { return true; }
     bool   producesMidi() const override { return false; }
     bool   isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override { return samplerEngine.getTailLengthSeconds(); }
 
     int  getNumPrograms()    override { return 1; }
     int  getCurrentProgram() override { return 0; }
@@ -39,10 +39,21 @@ public:
     // Parameters exposed to the UI
     juce::AudioParameterFloat* tightnessParam    = nullptr;
     juce::AudioParameterFloat* harmonicBlendParam = nullptr;
+#if !JucePlugin_IsSynth
+    juce::AudioParameterFloat* dryParam = nullptr;
+    juce::AudioParameterFloat* wetParam = nullptr;
+    juce::AudioParameterFloat* triggerDbParam = nullptr;
+#endif
 
 private:
     AnalyzerEngine analyzerEngine;
     SamplerEngine  samplerEngine;
+#if !JucePlugin_IsSynth
+    juce::MidiBuffer triggerMidi;
+    bool triggerArmed = true;
+    int retriggerSamples = 0;
+    int retriggerHoldSamples = 0;
+#endif
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SmartSamplerProcessor)
 };
