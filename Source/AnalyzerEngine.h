@@ -21,10 +21,10 @@ public:
 
 private:
     // --- Spectral flux onset detection ---
-    void detectOnset(const juce::AudioBuffer<float>& buf);
+    void detectOnset(const juce::AudioBuffer<float>& buf, int channel);
 
     // --- Autocorrelation pitch tracking (YIN-style) ---
-    void detectPitch(const juce::AudioBuffer<float>& buf);
+    void detectPitch(const juce::AudioBuffer<float>& buf, int channel);
 
     double sampleRate  = 44100.0;
     int    bufferSize  = 512;

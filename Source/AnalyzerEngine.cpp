@@ -36,8 +36,20 @@ void AnalyzerEngine::analyzeBlock(const juce::AudioBuffer<float>& buf)
         return;
     }
 
-    detectOnset(buf);
-    detectPitch(buf);
+    // Use the strongest channel, preserving right-only and antiphase signals.
+    int channel = 0;
+    float strongest = 0.0f;
+    for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+    {
+        const float magnitude = buf.getMagnitude(ch, 0, buf.getNumSamples());
+        if (magnitude > strongest)
+        {
+            strongest = magnitude;
+            channel = ch;
+        }
+    }
+    detectOnset(buf, channel);
+    detectPitch(buf, channel);
 
     // The public timing map is intentionally capped at 512 entries. Hosts may
     // provide larger or variable blocks, so never index it using blockSize.
@@ -50,10 +62,10 @@ void AnalyzerEngine::analyzeBlock(const juce::AudioBuffer<float>& buf)
             warpPull * (static_cast<float>(i) / static_cast<float>(mapSamples));
 }
 
-void AnalyzerEngine::detectOnset(const juce::AudioBuffer<float>& buf)
+void AnalyzerEngine::detectOnset(const juce::AudioBuffer<float>& buf, int channel)
 {
     // --- Dual envelope follower (fast attack / slow release) ---
-    const float* data   = buf.getReadPointer(0);
+    const float* data   = buf.getReadPointer(channel);
     const int    nSamps = buf.getNumSamples();
 
     if (nSamps == 0)
@@ -99,10 +111,10 @@ void AnalyzerEngine::detectOnset(const juce::AudioBuffer<float>& buf)
         onsetStrength = juce::jmin(1.0f, onsetStrength + (flux / 10.0f));
 }
 
-void AnalyzerEngine::detectPitch(const juce::AudioBuffer<float>& buf)
+void AnalyzerEngine::detectPitch(const juce::AudioBuffer<float>& buf, int channel)
 {
     // YIN-style autocorrelation for fundamental frequency
-    const float* data   = buf.getReadPointer(0);
+    const float* data   = buf.getReadPointer(channel);
     const int    nSamps = buf.getNumSamples();
 
     if (nSamps < 16)

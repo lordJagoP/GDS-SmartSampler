@@ -124,6 +124,14 @@ instrument slot. Drop a sample into its editor and play the source audio.
   with hysteresis and a minimum 50 ms interval between automatic triggers.
   This is audio-triggered sample layering/replacement, not a general-purpose
   continuous pitch/time processor for the original audio.
+- **Gate envelope**: instant attack with a 30 ms release avoids re-arming on
+  ordinary waveform zero-crossings. A new trigger requires the source
+  envelope to fall below half the threshold.
+- **Optional MIDI**: externally routed MIDI can transpose/retrigger samples,
+  and note-off stops the monophonic voice. Fixed-root one-shot behavior
+  describes automatic audio triggers, not external MIDI performance.
+- **Tail reporting**: the reported tail is a conservative maximum at the
+  minimum supported pitch ratio (0.1), not the nominal root-note duration.
 - **Session recall**: parameters are saved, but the loaded sample is not yet
   embedded or restored from a path. Reload the sample when reopening a session.
 - **Host validation**: builds and processor tests do not substitute for testing

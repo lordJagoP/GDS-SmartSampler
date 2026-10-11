@@ -4,7 +4,8 @@
 #include "PluginProcessor.h"
 
 class SmartSamplerEditor : public juce::AudioProcessorEditor,
-                           public juce::FileDragAndDropTarget
+                           public juce::FileDragAndDropTarget,
+                           private juce::Timer
 {
 public:
     SmartSamplerEditor(SmartSamplerProcessor&);
@@ -19,6 +20,7 @@ public:
 
 private:
     SmartSamplerProcessor& processor;
+    void timerCallback() override;
 
     juce::Slider tightnessKnob;
     juce::Slider harmonicBlendKnob;

@@ -25,10 +25,23 @@ if ($Install) {
         Where-Object { $_.ProcessName -match 'Ableton|Studio One|Studio Pro|Fender' }) {
         throw 'Close Ableton and Fender Studio Pro before installing.'
     }
-    if (Test-Path (Join-Path $destination 'SmartSampler FX.vst3')) {
-        throw 'An FX bundle already exists. Back it up or remove it manually before installing.'
+    $mutex = New-Object System.Threading.Mutex($false, 'Local\GDSSmartSamplerFXInstall')
+    $held = $false
+    $stage = Join-Path $destination ('_SmartSamplerFX_stage_' + [guid]::NewGuid().ToString() + '.vst3')
+    try {
+        $held = $mutex.WaitOne(0)
+        if (-not $held) { throw 'Another SmartSampler FX installation is running.' }
+        $final = Join-Path $destination 'SmartSampler FX.vst3'
+        if (Test-Path -LiteralPath $final) {
+            throw 'An FX bundle already exists. Back it up or remove it manually before installing.'
+        }
+        New-Item -ItemType Directory -Path $destination -Force | Out-Null
+        Copy-Item -LiteralPath $fx -Destination $stage -Recurse
+        Move-Item -LiteralPath $stage -Destination $final
+        Write-Host 'Installed SmartSampler FX. Enable VST3 scanning and rescan in your DAW.'
+    } finally {
+        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+        if ($held) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
     }
-    New-Item -ItemType Directory -Path $destination -Force | Out-Null
-    Copy-Item -LiteralPath $fx -Destination $destination -Recurse
-    Write-Host 'Installed SmartSampler FX. Enable VST3 scanning and rescan in your DAW.'
 }

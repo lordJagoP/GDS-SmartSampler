@@ -17,7 +17,7 @@ void check(bool condition, const char* message)
 }
 bool near(float a, float b) { return std::abs(a - b) < 0.0001f; }
 
-juce::File makeSample(double rate)
+juce::File makeSample(double rate, int channels = 1, bool rightOnly = false, int length = 8192)
 {
     auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
         .getNonexistentChildFile("smartsampler-test", ".wav");
@@ -25,11 +25,14 @@ juce::File makeSample(double rate)
     std::unique_ptr<juce::OutputStream> stream = file.createOutputStream();
     auto writer = format.createWriterFor(stream,
         juce::AudioFormatWriterOptions().withSampleRate(rate)
-            .withNumChannels(1).withBitsPerSample(16));
+            .withNumChannels(channels).withBitsPerSample(16));
     check(writer != nullptr, "Create WAV fixture");
-    juce::AudioBuffer<float> sample(1, 8192);
+    juce::AudioBuffer<float> sample(channels, length);
+    sample.clear();
     for (int i = 0; i < sample.getNumSamples(); ++i)
-        sample.setSample(0, i, 0.25f);
+        for (int ch = 0; ch < channels; ++ch)
+            if (!rightOnly || ch == channels - 1)
+                sample.setSample(ch, i, 0.25f);
     if (writer != nullptr)
         check(writer->writeFromAudioSampleBuffer(sample, 0, sample.getNumSamples()), "Write WAV fixture");
     return file;
@@ -40,7 +43,8 @@ void testSampler(const juce::File& sample)
     SamplerEngine engine;
     engine.prepare(48000.0, 128);
     check(engine.loadSample(sample), "Decode WAV");
-    check(engine.getTailLengthSeconds() > 0.0, "Sample tail reported to host");
+    check(std::abs(engine.getTailLengthSeconds() - 8192.0 / (48000.0 * 0.1)) < 0.000001,
+        "Conservative tail matches minimum supported pitch duration");
     std::array<float, 512> timing{};
     juce::AudioBuffer<float> out(2, 1024);
     juce::MidiBuffer midi;
@@ -77,18 +81,48 @@ void testSampler(const juce::File& sample)
 
 void testSampleRate()
 {
-    auto sample = makeSample(24000.0);
+    auto sample = makeSample(48000.0, 2, true);
     SamplerEngine engine;
     engine.prepare(48000.0, 128);
-    check(engine.loadSample(sample), "Decode different-rate WAV");
-    juce::AudioBuffer<float> out(2, 17000);
+    check(engine.loadSample(sample), "Decode right-only stereo WAV");
+    juce::AudioBuffer<float> out(1, 16);
     juce::MidiBuffer midi;
     midi.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 0);
     std::array<float, 512> timing{};
     engine.processMidi(midi, out, timing, 0.0f, 0.0f, 0.0f);
-    check(near(out.getSample(0, 16383), 0.25f), "Source sample rate doubles duration correctly");
-    check(near(out.getSample(0, 16384), 0.0f), "Different-rate sample ends correctly");
+    check(near(out.getSample(0, 0), 0.125f), "Stereo right channel survives mono downmix");
     sample.deleteFile();
+    for (const double rate : {24000.0, 384000.0, 2400.0})
+    {
+        sample = makeSample(rate, 1, false, 512);
+        check(engine.loadSample(sample), "Decode different-rate WAV");
+        const int duration = static_cast<int>(512.0 * 48000.0 / rate);
+        out.setSize(2, duration + 4);
+        engine.processMidi(midi, out, timing, 0.0f, 0.0f, 0.0f);
+        check(near(out.getSample(0, duration - 2), 0.25f), "Source/host ratio preserves duration");
+        check(near(out.getSample(0, duration + 2), 0.0f), "Different-rate sample ends correctly");
+        check(std::abs(engine.getTailLengthSeconds() - 512.0 / (rate * 0.1)) < 0.000001,
+            "Tail bound uses source sample rate");
+        sample.deleteFile();
+    }
+    AnalyzerEngine left, right;
+    left.prepare(48000.0, 512);
+    right.prepare(48000.0, 512);
+    juce::AudioBuffer<float> leftInput(2, 512), rightInput(2, 512);
+    leftInput.clear();
+    rightInput.clear();
+    for (int i = 0; i < 512; ++i)
+    {
+        const float value = 0.5f * std::sin(2.0f * juce::MathConstants<float>::pi * i / 48.0f);
+        leftInput.setSample(0, i, value);
+        rightInput.setSample(1, i, value);
+    }
+    left.analyzeBlock(leftInput);
+    right.analyzeBlock(rightInput);
+    check(left.getCurrentPitch() > 0.0f && near(left.getCurrentPitch(), right.getCurrentPitch()),
+        "Right-only pitch analysis matches left");
+    check(near(left.getOnsetStrength(), right.getOnsetStrength()),
+        "Right-only onset analysis matches left");
 }
 
 void testProcessor(const juce::File& sample)
@@ -156,6 +190,29 @@ void testProcessor(const juce::File& sample)
     check(near(buffer.getSample(0, 0), 0.02f), "Sidechain never overwrites dry main input");
     check(near(buffer.getSample(0, 40), 0.0f), "Sidechain trigger offset");
     check(near(buffer.getSample(0, 41), wetExpected), "Sidechain triggers wet sample");
+    SmartSamplerProcessor sustained;
+    sustained.prepareToPlay(48000.0, 128);
+    check(sustained.loadSampleFile(sample), "Sustained-input fixture load");
+    *sustained.dryParam = 0.0f;
+    *sustained.wetParam = 1.0f;
+    *sustained.tightnessParam = 0.0f;
+    *sustained.harmonicBlendParam = 0.0f;
+    buffer.setSize(2, 128);
+    for (int block = 0; block < 80; ++block)
+    {
+        for (int i = 0; i < 128; ++i)
+        {
+            const float value = 0.5f * std::sin(2.0f * juce::MathConstants<float>::pi
+                * static_cast<float>(block * 128 + i) / 192.0f);
+            buffer.setSample(0, i, value);
+            buffer.setSample(1, i, value);
+        }
+        sustained.processBlock(buffer, midi);
+        if (block == 1)
+            check(buffer.getMagnitude(0, 128) > 0.0f, "Sustained input triggers initial sample");
+    }
+    check(near(buffer.getMagnitude(0, 128), 0.0f),
+        "Sustained waveform zero crossings do not restart completed sample");
 #endif
     processor.releaseResources();
 }

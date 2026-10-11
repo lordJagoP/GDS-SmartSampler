@@ -53,6 +53,8 @@ private:
     bool triggerArmed = true;
     int retriggerSamples = 0;
     int retriggerHoldSamples = 0;
+    float triggerEnvelope = 0.0f;
+    float triggerRelease = 0.0f;
 #endif
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SmartSamplerProcessor)

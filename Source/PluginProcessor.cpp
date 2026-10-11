@@ -32,6 +32,8 @@ void SmartSamplerProcessor::prepareToPlay(double sr, int blockSize)
     triggerArmed = true;
     retriggerSamples = 0;
     retriggerHoldSamples = juce::jmax(1, static_cast<int>(sr * 0.05));
+    triggerEnvelope = 0.0f;
+    triggerRelease = static_cast<float>(std::exp(-1.0 / (0.03 * sr)));
 #endif
 }
 
@@ -100,9 +102,11 @@ void SmartSamplerProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             peak = juce::jmax(peak, std::abs(triggerInput.getSample(ch, i)));
         if (retriggerSamples > 0)
             --retriggerSamples;
-        if (peak < threshold * 0.5f)
+        // Zero crossings must not re-arm the gate during a sustained sound.
+        triggerEnvelope = juce::jmax(peak, triggerEnvelope * triggerRelease);
+        if (triggerEnvelope < threshold * 0.5f)
             triggerArmed = true;
-        if (triggerArmed && peak >= threshold && retriggerSamples == 0)
+        if (triggerArmed && triggerEnvelope >= threshold && retriggerSamples == 0)
         {
             triggerMidi.addEvent(juce::MidiMessage::noteOn(1, 60,
                 juce::jlimit(0.0f, 1.0f, peak)), i);

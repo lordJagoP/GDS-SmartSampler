@@ -20,6 +20,8 @@ SmartSamplerEditor::SmartSamplerEditor(SmartSamplerProcessor& p)
                 static_cast<float>(knob.getValue())));
         };
         label.setText(parameter->name, juce::dontSendNotification);
+        knob.onDragStart = [parameter]() { parameter->beginChangeGesture(); };
+        knob.onDragEnd = [parameter]() { parameter->endChangeGesture(); };
         label.setJustificationType(juce::Justification::centred);
         addAndMakeVisible(knob);
         addAndMakeVisible(label);
@@ -67,15 +69,38 @@ SmartSamplerEditor::SmartSamplerEditor(SmartSamplerProcessor& p)
     // Wire knobs directly to processor parameters
     tightnessKnob.onValueChange = [this]()
     {
-        *processor.tightnessParam = (float)tightnessKnob.getValue();
+        processor.tightnessParam->setValueNotifyingHost(
+            processor.tightnessParam->convertTo0to1(static_cast<float>(tightnessKnob.getValue())));
     };
     harmonicBlendKnob.onValueChange = [this]()
     {
-        *processor.harmonicBlendParam = (float)harmonicBlendKnob.getValue();
+        processor.harmonicBlendParam->setValueNotifyingHost(
+            processor.harmonicBlendParam->convertTo0to1(static_cast<float>(harmonicBlendKnob.getValue())));
     };
+    tightnessKnob.onDragStart = [this]() { processor.tightnessParam->beginChangeGesture(); };
+    tightnessKnob.onDragEnd = [this]() { processor.tightnessParam->endChangeGesture(); };
+    harmonicBlendKnob.onDragStart = [this]() { processor.harmonicBlendParam->beginChangeGesture(); };
+    harmonicBlendKnob.onDragEnd = [this]() { processor.harmonicBlendParam->endChangeGesture(); };
+    startTimerHz(20);
 }
 
 SmartSamplerEditor::~SmartSamplerEditor() {}
+
+void SmartSamplerEditor::timerCallback()
+{
+    const auto sync = [](juce::Slider& knob, juce::AudioParameterFloat* parameter)
+    {
+        if (!knob.isMouseButtonDown())
+            knob.setValue(parameter->get(), juce::dontSendNotification);
+    };
+    sync(tightnessKnob, processor.tightnessParam);
+    sync(harmonicBlendKnob, processor.harmonicBlendParam);
+#if !JucePlugin_IsSynth
+    sync(dryKnob, processor.dryParam);
+    sync(wetKnob, processor.wetParam);
+    sync(triggerKnob, processor.triggerDbParam);
+#endif
+}
 
 void SmartSamplerEditor::filesDropped(const juce::StringArray& files, int, int)
 {

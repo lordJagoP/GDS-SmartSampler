@@ -10,7 +10,8 @@ void SamplerEngine::prepare(double sr, int blockSz)
 {
     const juce::ScopedLock lock(sampleLock);
     sampleRate = sr;
-    tailSeconds.store(static_cast<double>(sampleLength) / (sampleRate * 0.1));
+    // Conservative maximum at the minimum pitch ratio, not nominal duration.
+    tailSeconds.store(static_cast<double>(sampleLength) / (sourceSampleRate * 0.1));
     blockSize  = blockSz;
     playheadPos = 0.0;
     isPlaying   = false;
@@ -20,6 +21,7 @@ bool SamplerEngine::loadSample(const juce::File& file)
 {
     std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
     if (reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels == 0
+        || reader->sampleRate <= 0.0
         || reader->lengthInSamples > std::numeric_limits<int>::max())
         return false;
 
@@ -34,7 +36,7 @@ bool SamplerEngine::loadSample(const juce::File& file)
     sampleBuffer = std::move(decoded);
     sampleLength = sampleBuffer.getNumSamples();
     sourceSampleRate = reader->sampleRate;
-    tailSeconds.store(static_cast<double>(sampleLength) / (sampleRate * 0.1));
+    tailSeconds.store(static_cast<double>(sampleLength) / (sourceSampleRate * 0.1));
     sampleLoaded.store(true);
     playheadPos = 0.0;
     isPlaying = false;
@@ -106,13 +108,14 @@ void SamplerEngine::processMidi(juce::MidiBuffer& midi,
                 ? timingMap[static_cast<size_t>(i)] : 0.0f;
             const double warpDelta = static_cast<double>(timingOffset) * tightness * 2.0;
             const double playbackRate = juce::jlimit(0.1, 4.0,
-                (midiRatio + warpDelta) * sourceSampleRate / sampleRate);
+                midiRatio + warpDelta) * sourceSampleRate / sampleRate;
             const int idx = static_cast<int>(playheadPos);
             const float frac = static_cast<float>(playheadPos - idx);
             const int idxN = juce::jmin(idx + 1, sampleLength - 1);
             const float sampleL = srcL[idx] * (1.0f - frac) + srcL[idxN] * frac;
             const float sampleR = srcR[idx] * (1.0f - frac) + srcR[idxN] * frac;
-            outL[i] += sampleL * currentVelocity * outputGain;
+            const float leftOrMono = outR != nullptr ? sampleL : (sampleL + sampleR) * 0.5f;
+            outL[i] += leftOrMono * currentVelocity * outputGain;
             if (outR)
                 outR[i] += sampleR * currentVelocity * outputGain;
             playheadPos += playbackRate;
