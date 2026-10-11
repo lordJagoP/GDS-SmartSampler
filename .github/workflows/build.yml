@@ -20,15 +20,27 @@ jobs:
             libxinerama-dev libxrandr-dev libxrender-dev libxi-dev \
             libglu1-mesa-dev mesa-common-dev libegl-dev
       - name: Configure
-        run: cmake -S Source -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S Source -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSMARTSAMPLER_BUILD_TESTS=ON
       - name: Build
-        run: cmake --build build --parallel 2 --target SmartSampler_VST3 SmartSampler_Standalone
+        run: cmake --build build --parallel 2 --target SmartSampler_VST3 SmartSampler_Standalone SmartSamplerFX_VST3 SmartSamplerFX_Standalone SmartSamplerTests SmartSamplerFXTests
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
 
   windows:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -S Source -B build -A x64
+        run: cmake -S Source -B build -A x64 -DSMARTSAMPLER_BUILD_TESTS=ON
       - name: Build
-        run: cmake --build build --config Release --parallel 2 --target SmartSampler_VST3 SmartSampler_Standalone
+        run: cmake --build build --config Release --parallel 2 --target SmartSampler_VST3 SmartSampler_Standalone SmartSamplerFX_VST3 SmartSamplerFX_Standalone SmartSamplerTests SmartSamplerFXTests
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Package Windows bundles
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "build/SmartSampler_artefacts/Release/VST3/SmartSampler.vst3", "build/SmartSamplerFX_artefacts/Release/VST3/SmartSampler FX.vst3" -DestinationPath "build/SmartSampler-Windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SmartSampler-Windows-x64
+          path: build/SmartSampler-Windows-x64.zip

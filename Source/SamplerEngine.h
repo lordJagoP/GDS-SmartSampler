@@ -15,17 +15,22 @@ public:
                      const std::array<float, 512>& timingMap,
                      float sidechainPitchHz,
                      float tightness,
-                     float harmonicBlend);
+                     float harmonicBlend,
+                     float outputGain = 1.0f,
+                     bool clearOutput = true);
 
     bool isSampleLoaded() const { return sampleLoaded.load(); }
+    double getTailLengthSeconds() const { return tailSeconds.load(); }
 
 private:
     void triggerNote(int midiNote, float velocity);
     void releaseNote(int midiNote);
 
     double sampleRate  = 44100.0;
+    double sourceSampleRate = 44100.0;
     int    blockSize   = 512;
     std::atomic_bool sampleLoaded { false };
+    std::atomic<double> tailSeconds { 0.0 };
 
     juce::AudioBuffer<float> sampleBuffer;
     int    sampleLength    = 0;

@@ -5,6 +5,31 @@ SmartSamplerEditor::SmartSamplerEditor(SmartSamplerProcessor& p)
     : AudioProcessorEditor(&p), processor(p)
 {
     setSize(400, 250);
+#if !JucePlugin_IsSynth
+    setSize(480, 400);
+    const auto setup = [this](juce::Slider& knob, juce::Label& label,
+                              juce::AudioParameterFloat* parameter)
+    {
+        knob.setSliderStyle(juce::Slider::RotaryVerticalDrag);
+        knob.setRange(parameter->range.start, parameter->range.end);
+        knob.setValue(parameter->get());
+        knob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 18);
+        knob.onValueChange = [&knob, parameter]()
+        {
+            parameter->setValueNotifyingHost(parameter->convertTo0to1(
+                static_cast<float>(knob.getValue())));
+        };
+        label.setText(parameter->name, juce::dontSendNotification);
+        knob.onDragStart = [parameter]() { parameter->beginChangeGesture(); };
+        knob.onDragEnd = [parameter]() { parameter->endChangeGesture(); };
+        label.setJustificationType(juce::Justification::centred);
+        addAndMakeVisible(knob);
+        addAndMakeVisible(label);
+    };
+    setup(dryKnob, dryLabel, processor.dryParam);
+    setup(wetKnob, wetLabel, processor.wetParam);
+    setup(triggerKnob, triggerLabel, processor.triggerDbParam);
+#endif
 
     // Drop zone label
     dropZoneLabel.setText("Drop a sample here (.wav / .aif)", juce::dontSendNotification);
@@ -44,15 +69,38 @@ SmartSamplerEditor::SmartSamplerEditor(SmartSamplerProcessor& p)
     // Wire knobs directly to processor parameters
     tightnessKnob.onValueChange = [this]()
     {
-        *processor.tightnessParam = (float)tightnessKnob.getValue();
+        processor.tightnessParam->setValueNotifyingHost(
+            processor.tightnessParam->convertTo0to1(static_cast<float>(tightnessKnob.getValue())));
     };
     harmonicBlendKnob.onValueChange = [this]()
     {
-        *processor.harmonicBlendParam = (float)harmonicBlendKnob.getValue();
+        processor.harmonicBlendParam->setValueNotifyingHost(
+            processor.harmonicBlendParam->convertTo0to1(static_cast<float>(harmonicBlendKnob.getValue())));
     };
+    tightnessKnob.onDragStart = [this]() { processor.tightnessParam->beginChangeGesture(); };
+    tightnessKnob.onDragEnd = [this]() { processor.tightnessParam->endChangeGesture(); };
+    harmonicBlendKnob.onDragStart = [this]() { processor.harmonicBlendParam->beginChangeGesture(); };
+    harmonicBlendKnob.onDragEnd = [this]() { processor.harmonicBlendParam->endChangeGesture(); };
+    startTimerHz(20);
 }
 
 SmartSamplerEditor::~SmartSamplerEditor() {}
+
+void SmartSamplerEditor::timerCallback()
+{
+    const auto sync = [](juce::Slider& knob, juce::AudioParameterFloat* parameter)
+    {
+        if (!knob.isMouseButtonDown())
+            knob.setValue(parameter->get(), juce::dontSendNotification);
+    };
+    sync(tightnessKnob, processor.tightnessParam);
+    sync(harmonicBlendKnob, processor.harmonicBlendParam);
+#if !JucePlugin_IsSynth
+    sync(dryKnob, processor.dryParam);
+    sync(wetKnob, processor.wetParam);
+    sync(triggerKnob, processor.triggerDbParam);
+#endif
+}
 
 void SmartSamplerEditor::filesDropped(const juce::StringArray& files, int, int)
 {
@@ -75,7 +123,7 @@ void SmartSamplerEditor::paint(juce::Graphics& g)
     g.fillAll(juce::Colour(0xff1a1a2e));
     g.setColour(juce::Colours::cyan);
     g.setFont(16.0f);
-    g.drawText("SmartSampler | Golden Digital Services",
+    g.drawText(processor.getName() + " | Golden Digital Services",
                getLocalBounds().removeFromTop(30),
                juce::Justification::centred);
 }
@@ -99,4 +147,16 @@ void SmartSamplerEditor::resized()
 
     harmonicBlendLabel.setBounds(knobRow.removeFromBottom(20));
     harmonicBlendKnob.setBounds(knobRow);
+#if !JucePlugin_IsSynth
+    auto fxRow = area.removeFromTop(120);
+    const int width = fxRow.getWidth() / 3;
+    auto dryArea = fxRow.removeFromLeft(width);
+    dryLabel.setBounds(dryArea.removeFromBottom(20));
+    dryKnob.setBounds(dryArea);
+    auto wetArea = fxRow.removeFromLeft(width);
+    wetLabel.setBounds(wetArea.removeFromBottom(20));
+    wetKnob.setBounds(wetArea);
+    triggerLabel.setBounds(fxRow.removeFromBottom(20));
+    triggerKnob.setBounds(fxRow);
+#endif
 }
